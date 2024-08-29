@@ -233,7 +233,7 @@ fn write_to_texture(
     let handle = images.add(image);
 
     commands.spawn((MaterialMesh2dBundle {
-        mesh: Mesh2dHandle(meshes.add(Rectangle::new(200., 200.))),
+        mesh: Mesh2dHandle(meshes.add(Rectangle::new(viewport.world.x, viewport.world.y))),
         material: materials.add(Material {
             texture: Some(handle),
         }),
