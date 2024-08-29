@@ -1,11 +1,10 @@
 use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssetUsages;
-use bevy::render::render_resource::binding_types::sampler;
 use bevy::render::render_resource::{
     AsBindGroup, Extent3d, ShaderRef, TextureDimension, TextureFormat,
 };
-use bevy::render::texture;
 use bevy::sprite::{Material2d, Material2dPlugin, MaterialMesh2dBundle, Mesh2dHandle};
+use bevy::window::WindowResized;
 use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use bevy_inspector_egui::{inspector_options::std_options::NumberDisplay, prelude::*};
 use parry2d::{
@@ -27,17 +26,24 @@ pub struct LightMaterial {
 
 impl Plugin for LightPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (update_probes, write_to_texture))
-            .register_type::<RadianceCascadeConfig>()
-            .insert_resource(RadianceCascadeConfig {
-                cascades: 1,
-                cascade_zero_probes: 16,
-                cascade_zero_rays: 4,
-                cascade_zero_ray_length: 20,
-            })
-            .add_plugins(ResourceInspectorPlugin::<RadianceCascadeConfig>::default())
-            .add_plugins(Material2dPlugin::<Material>::default())
-            .init_resource::<RadianceCascade>();
+        app.add_systems(
+            Update,
+            (
+                update_probes,
+                ((recreate_texture, write_to_texture).chain(),),
+            )
+                .chain(),
+        )
+        .register_type::<RadianceCascadeConfig>()
+        .insert_resource(RadianceCascadeConfig {
+            cascades: 1,
+            cascade_zero_probes: 16,
+            cascade_zero_rays: 4,
+            cascade_zero_ray_length: 20,
+        })
+        .add_plugins(ResourceInspectorPlugin::<RadianceCascadeConfig>::default())
+        .add_plugins(Material2dPlugin::<Material>::default())
+        .init_resource::<RadianceCascade>();
     }
 }
 
@@ -57,7 +63,7 @@ struct RadianceCascadeConfig {
 
 #[derive(Resource, Default)]
 struct RadianceCascade {
-    pub data: Vec<f32>,
+    pub data: Vec<Color>,
 }
 
 //fn _test_raycast(
@@ -147,7 +153,9 @@ fn update_probes(
         conf.cascade_zero_probes * conf.cascade_zero_probes * conf.cascade_zero_rays;
     let rays_count = rays_per_cascade * conf.cascades;
 
-    cascade.data.resize(rays_count, 0.);
+    cascade
+        .data
+        .resize(rays_count, Color::srgba(0., 0., 0., 0.));
 
     for ray in 0..rays_count {
         let cascade_index =
@@ -176,10 +184,10 @@ fn update_probes(
         cascade.data[ray] = if let Some((hit, toi)) = cast_ray(start, end, &emitters) {
             gizmos.line_2d(start, start.lerp(end, toi / start.distance(end)), hit.color);
             // TODO color strength ?
-            hit.color.to_srgba().red
+            hit.color
         } else {
             gizmos.line_2d(start, end, Color::srgb(0.2, 0.2, 0.2));
-            0.
+            Color::srgba(0., 0., 0., 0.)
         }
     }
 }
@@ -197,7 +205,10 @@ impl Material2d for Material {
     }
 }
 
-fn write_to_texture(
+#[derive(Component)]
+struct LightTexture;
+
+fn recreate_texture(
     conf: Res<RadianceCascadeConfig>,
     cascade: Res<RadianceCascade>,
     viewport: Res<Viewport>,
@@ -206,7 +217,17 @@ fn write_to_texture(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<Material>>,
+    mut resize: EventReader<WindowResized>,
+    mut light_textures: Query<(Entity), With<LightTexture>>,
 ) {
+    if resize.read().next().is_none() {
+        return;
+    }
+
+    for entity in light_textures.iter() {
+        commands.entity(entity).despawn();
+    }
+
     let camera = camera.single();
 
     let mut image = Image::new_fill(
@@ -221,23 +242,57 @@ fn write_to_texture(
         RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
     );
 
-    for i in 0..(viewport.logical.x as usize * viewport.logical.y as usize) {
-        let x = i % viewport.logical.x as usize;
-        let y = i / viewport.logical.x as usize;
-
-        // TODO color from probe sampling
-        let color = Color::srgba(1., 1., 0., 1.);
-        image.data[i * 4..i * 4 + 4].copy_from_slice(&color.to_srgba().to_u8_array());
-    }
+    //let mut image = Image::new(
+    //Extent3d {
+    //width: (cascade.data.len() as f32).sqrt() as u32,
+    //height: (cascade.data.len() as f32).sqrt() as u32,
+    //depth_or_array_layers: 1,
+    //},
+    //TextureDimension::D2,
+    //cascade
+    //.data
+    //.iter()
+    //.flat_map(|c| c.to_srgba().to_u8_array())
+    //.collect::<Vec<u8>>(),
+    //TextureFormat::Rgba8Unorm,
+    //RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+    //);
 
     let handle = images.add(image);
 
-    commands.spawn((MaterialMesh2dBundle {
-        mesh: Mesh2dHandle(meshes.add(Rectangle::new(viewport.world.x, viewport.world.y))),
-        material: materials.add(Material {
-            texture: Some(handle),
-        }),
-        transform: Transform::IDENTITY,
-        ..default()
-    },));
+    commands.spawn((
+        LightTexture,
+        MaterialMesh2dBundle {
+            mesh: Mesh2dHandle(meshes.add(Rectangle::new(viewport.world.x, viewport.world.y))),
+            material: materials.add(Material {
+                texture: Some(handle),
+            }),
+            transform: Transform::IDENTITY,
+            ..default()
+        },
+    ));
+}
+
+fn write_to_texture(
+    conf: Res<RadianceCascadeConfig>,
+    cascade: Res<RadianceCascade>,
+    viewport: Res<Viewport>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<Material>>,
+    light_textures: Query<(Entity, &Handle<Material>), With<LightTexture>>,
+) {
+    if let Ok((_, handle)) = light_textures.get_single() {
+        let material = materials.get(handle).unwrap();
+        if let Some(image_handle) = &material.texture {
+            let mut image = images.get_mut(image_handle).unwrap();
+            for i in 0..(viewport.logical.x as usize * viewport.logical.y as usize) {
+                let x = i % viewport.logical.x as usize;
+                let y = i / viewport.logical.x as usize;
+
+                // TODO color from probe sampling
+                let color = Color::srgba(1., 1., 0., 1.);
+                image.data[i * 4..i * 4 + 4].copy_from_slice(&color.to_srgba().to_u8_array());
+            }
+        }
+    }
 }
