@@ -166,6 +166,11 @@ fn update_probes(
         let ray_index = (ray - rays_per_cascade * cascade_index) % rays_per_probe;
         let ray_length = conf.cascade_zero_ray_length * 4_usize.pow(cascade_index as u32);
 
+        // TODO
+        // probe spacing
+        // should the probes should be evenly spaced on the whole screen
+        // or on each axis ?
+        // probably on the whole screen, but its gonna be harder
         let probe_spacing = viewport.world / probes_per_cascade as f32;
         let probe_x = (probe_index / probes_per_cascade) as f32 * viewport.world.x
             / probes_per_cascade as f32
