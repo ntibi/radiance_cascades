@@ -242,10 +242,11 @@ fn recreate_texture(
         RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
     );
 
-    //let mut image = Image::new(
+    // TODO add a debug view that renders the cascade data
+    //let image = Image::new(
     //Extent3d {
-    //width: (cascade.data.len() as f32).sqrt() as u32,
-    //height: (cascade.data.len() as f32).sqrt() as u32,
+    //width: ??
+    //height: ??
     //depth_or_array_layers: 1,
     //},
     //TextureDimension::D2,
