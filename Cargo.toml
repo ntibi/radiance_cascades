@@ -1,0 +1,58 @@
+[package]
+name = "wizrs"
+version = "0.1.0"
+edition = "2021"
+
+default-run = "wizrs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+members = ["crates/*"]
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[dependencies]
+light = { workspace = true }
+utils = { workspace = true }
+bevy = { workspace = true }
+timed = { workspace = true }
+parry2d = { workspace = true }
+bevy-inspector-egui = { workspace = true }
+
+[workspace.dependencies]
+light = { path = "./crates/light" }
+utils = { path = "./crates/utils" }
+bevy = { version = "0.14.0", default-features = false, features = [
+	"multi_threaded",
+	"bevy_asset",
+	"bevy_winit",
+	"bevy_render",
+	"bevy_core_pipeline",
+	"bevy_gizmos",
+	"bevy_sprite",
+	"bevy_text",
+	"bevy_ui",
+	"bevy_debug_stepping",
+	"default_font",
+	"png",
+	"x11",
+	"webgl2",
+	"asset_processor",
+	"serialize",
+	"jpeg",
+	"bmp",
+	"shader_format_spirv",
+	"async-io",
+	"embedded_watcher",
+	"file_watcher",
+	"bevy_gilrs",
+	"sysinfo_plugin",
+] }
+timed = "0.2.1"
+parry2d = "0.17.0"
+bevy-inspector-egui = "0.25.2"

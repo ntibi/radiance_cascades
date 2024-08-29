@@ -1,0 +1,10 @@
+[package]
+name = "light"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { workspace = true }
+parry2d = { workspace = true }
+utils = { workspace = true }
+bevy-inspector-egui = { workspace = true }
