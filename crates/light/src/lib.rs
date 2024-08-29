@@ -111,7 +111,7 @@ fn cast_ray<'m>(
     }
 }
 
-fn update_probes<'m>(
+fn update_probes(
     conf: Res<RadianceCascadeConfig>,
     mut cascade: ResMut<RadianceCascade>,
     viewport: Res<Viewport>,
@@ -166,10 +166,13 @@ fn update_probes<'m>(
         let start = camera_bottom_left + Vec2::new(probe_x, probe_y);
         let end = start + Vec2::new(ray_angle.cos(), ray_angle.sin()) * ray_length as f32;
 
-        if let Some((hit, toi)) = cast_ray(start, end, &emitters) {
+        cascade.data[ray] = if let Some((hit, toi)) = cast_ray(start, end, &emitters) {
             gizmos.line_2d(start, start.lerp(end, toi / start.distance(end)), hit.color);
+            // TODO color strength ?
+            hit.color.to_srgba().red
         } else {
             gizmos.line_2d(start, end, Color::srgb(0.2, 0.2, 0.2));
+            0.
         }
     }
 }
