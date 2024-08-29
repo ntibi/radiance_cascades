@@ -1,4 +1,11 @@
 use bevy::prelude::*;
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::binding_types::sampler;
+use bevy::render::render_resource::{
+    AsBindGroup, Extent3d, ShaderRef, TextureDimension, TextureFormat,
+};
+use bevy::render::texture;
+use bevy::sprite::{Material2d, Material2dPlugin, MaterialMesh2dBundle, Mesh2dHandle};
 use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use bevy_inspector_egui::{inspector_options::std_options::NumberDisplay, prelude::*};
 use parry2d::{
@@ -20,7 +27,7 @@ pub struct LightMaterial {
 
 impl Plugin for LightPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, update_probes)
+        app.add_systems(Update, (update_probes, write_to_texture))
             .register_type::<RadianceCascadeConfig>()
             .insert_resource(RadianceCascadeConfig {
                 cascades: 1,
@@ -29,6 +36,7 @@ impl Plugin for LightPlugin {
                 cascade_zero_ray_length: 20,
             })
             .add_plugins(ResourceInspectorPlugin::<RadianceCascadeConfig>::default())
+            .add_plugins(Material2dPlugin::<Material>::default())
             .init_resource::<RadianceCascade>();
     }
 }
@@ -119,8 +127,6 @@ fn update_probes(
     mut gizmos: Gizmos,
     camera: Query<&Transform, With<Camera>>,
 ) {
-    cascade.data.clear();
-
     let camera = camera.single();
     let camera_bottom_left = camera.translation.truncate() - viewport.world / 2.;
 
@@ -140,7 +146,8 @@ fn update_probes(
     let rays_per_cascade =
         conf.cascade_zero_probes * conf.cascade_zero_probes * conf.cascade_zero_rays;
     let rays_count = rays_per_cascade * conf.cascades;
-    cascade.data.reserve(rays_count);
+
+    cascade.data.resize(rays_count, 0.);
 
     for ray in 0..rays_count {
         let cascade_index =
@@ -175,4 +182,62 @@ fn update_probes(
             0.
         }
     }
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+struct Material {
+    #[texture(0)]
+    #[sampler(1)]
+    texture: Option<Handle<Image>>,
+}
+
+impl Material2d for Material {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/material.wgsl".into()
+    }
+}
+
+fn write_to_texture(
+    conf: Res<RadianceCascadeConfig>,
+    cascade: Res<RadianceCascade>,
+    viewport: Res<Viewport>,
+    camera: Query<&Transform, With<Camera>>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<Material>>,
+) {
+    let camera = camera.single();
+
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: viewport.logical.x as u32,
+            height: viewport.logical.y as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 255],
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+    );
+
+    for i in 0..(viewport.logical.x as usize * viewport.logical.y as usize) {
+        let x = i % viewport.logical.x as usize;
+        let y = i / viewport.logical.x as usize;
+
+        // TODO color from probe sampling
+        let color = Color::srgba(1., 1., 0., 1.);
+        image.data[i * 4..i * 4 + 4].copy_from_slice(&color.to_srgba().to_u8_array());
+    }
+
+    let handle = images.add(image);
+
+    commands.spawn((MaterialMesh2dBundle {
+        mesh: Mesh2dHandle(meshes.add(Rectangle::new(200., 200.))),
+        material: materials.add(Material {
+            texture: Some(handle),
+        }),
+        transform: Transform::IDENTITY,
+        ..default()
+    },));
 }
