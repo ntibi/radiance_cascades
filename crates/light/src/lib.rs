@@ -37,7 +37,7 @@ impl Plugin for LightPlugin {
         .register_type::<RadianceCascadeConfig>()
         .insert_resource(RadianceCascadeConfig {
             cascades: 1,
-            cascade_zero_probes: 16,
+            cascade_zero_spacing: 100,
             cascade_zero_rays: 4,
             cascade_zero_ray_length: 20,
         })
@@ -53,8 +53,8 @@ struct RadianceCascadeConfig {
     #[inspector(min = 1, max = 5, display = NumberDisplay::Slider)]
     /// number of cascades
     pub cascades: usize,
-    /// number of probes on one axis on cascade zero
-    pub cascade_zero_probes: usize,
+    /// space between the center of two probes on cascade zero
+    pub cascade_zero_spacing: usize,
     /// number of rays per probe on cascade zero
     pub cascade_zero_rays: usize,
     /// length of one ray on cascade zero
@@ -149,8 +149,9 @@ fn update_probes(
         .map(|(light, transform)| (light, transform.translation.xy()))
         .collect();
 
-    let rays_per_cascade =
-        conf.cascade_zero_probes * conf.cascade_zero_probes * conf.cascade_zero_rays;
+    let x_axis_probes = viewport.world.x as usize / conf.cascade_zero_spacing as usize;
+    let y_axis_probes = viewport.world.y as usize / conf.cascade_zero_spacing as usize;
+    let rays_per_cascade = x_axis_probes * y_axis_probes * conf.cascade_zero_rays;
     let rays_count = rays_per_cascade * conf.cascades;
 
     cascade
@@ -158,26 +159,23 @@ fn update_probes(
         .resize(rays_count, Color::srgba(0., 0., 0., 0.));
 
     for ray in 0..rays_count {
-        let cascade_index =
-            ray / (conf.cascade_zero_probes * conf.cascade_zero_probes * conf.cascade_zero_rays);
+        let cascade_index = ray / rays_per_cascade;
+        let spacing_goal =
+            conf.cascade_zero_spacing as f32 * (2_usize.pow(cascade_index as u32) as f32);
+        let x_axis_probes = viewport.world.x as usize / spacing_goal as usize;
+        let y_axis_probes = viewport.world.y as usize / spacing_goal as usize;
+        let x_spacing = viewport.world.x / x_axis_probes as f32;
+        let y_spacing = viewport.world.y / y_axis_probes as f32;
+
         let rays_per_probe = conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
-        let probes_per_cascade = conf.cascade_zero_probes / 2_usize.pow(cascade_index as u32);
         let probe_index = (ray - rays_per_cascade * cascade_index) / rays_per_probe;
         let ray_index = (ray - rays_per_cascade * cascade_index) % rays_per_probe;
         let ray_length = conf.cascade_zero_ray_length * 4_usize.pow(cascade_index as u32);
 
-        // TODO
-        // probe spacing
-        // should the probes should be evenly spaced on the whole screen
-        // or on each axis ?
-        // probably on the whole screen, but its gonna be harder
-        let probe_spacing = viewport.world / probes_per_cascade as f32;
-        let probe_x = (probe_index / probes_per_cascade) as f32 * viewport.world.x
-            / probes_per_cascade as f32
-            + probe_spacing.x / 2.;
-        let probe_y = (probe_index % probes_per_cascade) as f32 * viewport.world.y
-            / probes_per_cascade as f32
-            + probe_spacing.y / 2.;
+        let probe_x =
+            (probe_index % x_axis_probes) as f32 * x_spacing as f32 + x_spacing as f32 / 2.;
+        let probe_y =
+            (probe_index / x_axis_probes) as f32 * y_spacing as f32 + y_spacing as f32 / 2.;
 
         let angle_offset = std::f32::consts::TAU / rays_per_probe as f32 / 2.; // TODO
         let ray_angle =
