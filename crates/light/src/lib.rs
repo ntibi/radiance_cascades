@@ -125,6 +125,17 @@ fn cast_ray<'m>(
     }
 }
 
+fn next_power_of_two(v: u32) -> u32 {
+    let mut v = v;
+    v -= 1;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v + 1
+}
+
 fn update_probes(
     conf: Res<RadianceCascadeConfig>,
     mut cascade: ResMut<RadianceCascade>,
@@ -149,9 +160,14 @@ fn update_probes(
         .map(|(light, transform)| (light, transform.translation.xy()))
         .collect();
 
-    let x_axis_probes = viewport.world.x as usize / conf.cascade_zero_spacing as usize;
-    let y_axis_probes = viewport.world.y as usize / conf.cascade_zero_spacing as usize;
-    let rays_per_cascade = x_axis_probes * y_axis_probes * conf.cascade_zero_rays;
+    let cascade_zero_x_axis_probes =
+        next_power_of_two(viewport.world.x as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let cascade_zero_y_axis_probes =
+        next_power_of_two(viewport.world.y as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let cascade_zero_x_spacing = viewport.world.x / cascade_zero_x_axis_probes as f32;
+    let cascade_zero_y_spacing = viewport.world.y / cascade_zero_y_axis_probes as f32;
+    let rays_per_cascade =
+        cascade_zero_x_axis_probes * cascade_zero_y_axis_probes * conf.cascade_zero_rays;
     let rays_count = rays_per_cascade * conf.cascades;
 
     cascade
@@ -160,12 +176,10 @@ fn update_probes(
 
     for ray in 0..rays_count {
         let cascade_index = ray / rays_per_cascade;
-        let spacing_goal =
-            conf.cascade_zero_spacing as f32 * (2_usize.pow(cascade_index as u32) as f32);
-        let x_axis_probes = viewport.world.x as usize / spacing_goal as usize;
-        let y_axis_probes = viewport.world.y as usize / spacing_goal as usize;
-        let x_spacing = viewport.world.x / x_axis_probes as f32;
-        let y_spacing = viewport.world.y / y_axis_probes as f32;
+        let x_axis_probes = cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
+        let y_axis_probes = cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
+        let x_spacing = cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
+        let y_spacing = cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32;
 
         let rays_per_probe = conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
         let probe_index = (ray - rays_per_cascade * cascade_index) / rays_per_probe;
