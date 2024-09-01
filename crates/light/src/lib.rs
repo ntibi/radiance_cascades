@@ -4,7 +4,7 @@ use bevy::render::render_resource::{
     AsBindGroup, Extent3d, ShaderRef, TextureDimension, TextureFormat,
 };
 use bevy::sprite::{Material2d, Material2dPlugin, MaterialMesh2dBundle, Mesh2dHandle};
-use bevy::window::WindowResized;
+use bevy::window::{PrimaryWindow, WindowResized};
 use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use bevy_inspector_egui::{inspector_options::std_options::NumberDisplay, prelude::*};
 use parry2d::{
@@ -16,7 +16,7 @@ use parry2d::{
 
 pub struct LightPlugin;
 pub use parry2d;
-use utils::Viewport;
+use utils::{Mouse, Viewport};
 
 #[derive(Component)]
 pub struct LightMaterial {
@@ -30,7 +30,7 @@ impl Plugin for LightPlugin {
             Update,
             (
                 update_probes,
-                ((recreate_texture, write_to_texture).chain(),),
+                (debug_rays, (recreate_texture, write_to_texture).chain()),
             )
                 .chain(),
         )
@@ -308,9 +308,80 @@ fn write_to_texture(
                 let y = i / viewport.logical.x as usize;
 
                 // TODO color from probe sampling
-                let color = Color::srgba(1., 1., 0., 1.);
+                let color = Color::srgba(0., 0., 0., 0.);
                 image.data[i * 4..i * 4 + 4].copy_from_slice(&color.to_srgba().to_u8_array());
             }
+        }
+    }
+}
+
+fn debug_rays(
+    mouse: Res<Mouse>,
+    conf: Res<RadianceCascadeConfig>,
+    cascade: Res<RadianceCascade>,
+    viewport: Res<Viewport>,
+    mut gizmos: Gizmos,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<&Transform, With<Camera>>,
+) {
+    let camera = camera.get_single().unwrap();
+    let camera_bottom_left = camera.translation.truncate() - viewport.world / 2.;
+
+    let cascade_zero_x_axis_probes =
+        next_power_of_two(viewport.world.x as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let cascade_zero_y_axis_probes =
+        next_power_of_two(viewport.world.y as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let cascade_zero_x_spacing = viewport.world.x / cascade_zero_x_axis_probes as f32;
+    let cascade_zero_y_spacing = viewport.world.y / cascade_zero_y_axis_probes as f32;
+    let rays_per_cascade =
+        cascade_zero_x_axis_probes * cascade_zero_y_axis_probes * conf.cascade_zero_rays;
+    let rays_count = rays_per_cascade * conf.cascades;
+    let window = windows.single();
+
+    if let Some(world_position) = mouse.0 {
+        let Some(cursor) = mouse.0 else {
+            return;
+        };
+        // world pos but with the camera as origin
+        let (x, y) = (cursor - camera_bottom_left).into();
+
+        for cascade_index in (0..conf.cascades).rev() {
+            let x_axis_probes = cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
+            let y_axis_probes = cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
+            let x_spacing = cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
+            let y_spacing = cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32;
+
+            let rays_per_probe = conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
+
+            let probe_x = ((x - x_spacing / 2.) / x_spacing).floor() * x_spacing as f32
+                + x_spacing as f32 / 2.;
+            let probe_y = ((y - y_spacing / 2.) / y_spacing).floor() * y_spacing as f32
+                + y_spacing as f32 / 2.;
+            let bottom_left = camera_bottom_left + Vec2::new(probe_x, probe_y);
+
+            let probe_x = ((x - x_spacing / 2.) / x_spacing).ceil() * x_spacing as f32
+                + x_spacing as f32 / 2.;
+            let probe_y = ((y - y_spacing / 2.) / y_spacing).floor() * y_spacing as f32
+                + y_spacing as f32 / 2.;
+            let bottom_right = camera_bottom_left + Vec2::new(probe_x, probe_y);
+
+            let probe_x = ((x - x_spacing / 2.) / x_spacing).floor() * x_spacing as f32
+                + x_spacing as f32 / 2.;
+            let probe_y = ((y - y_spacing / 2.) / y_spacing).ceil() * y_spacing as f32
+                + y_spacing as f32 / 2.;
+            let top_left = camera_bottom_left + Vec2::new(probe_x, probe_y);
+
+            let probe_x = ((x - x_spacing / 2.) / x_spacing).ceil() * x_spacing as f32
+                + x_spacing as f32 / 2.;
+            let probe_y = ((y - y_spacing / 2.) / y_spacing).ceil() * y_spacing as f32
+                + y_spacing as f32 / 2.;
+            let top_right = camera_bottom_left + Vec2::new(probe_x, probe_y);
+
+            let size = 4. * (1. + cascade_index as f32);
+            gizmos.circle_2d(bottom_left, size, Color::srgb(0.2, 0.8, 0.2));
+            gizmos.circle_2d(bottom_right, size, Color::srgb(0.2, 0.8, 0.2));
+            gizmos.circle_2d(top_left, size, Color::srgb(0.2, 0.8, 0.2));
+            gizmos.circle_2d(top_right, size, Color::srgb(0.2, 0.8, 0.2));
         }
     }
 }
