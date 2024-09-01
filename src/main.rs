@@ -119,6 +119,7 @@ fn setup(mut commands: Commands) {
 }
 
 const MAX_SIZE: f32 = 200.;
+const MIN_SIZE: f32 = 50.;
 const MAX_DIST_FROM_CENTER: f32 = 500.;
 
 fn regen_shapes(
@@ -149,8 +150,8 @@ fn regen_shapes(
     }
 
     for _ in 0..to_add {
-        let size_x = rng.0.next() * MAX_SIZE;
-        let size_y = rng.0.next() * MAX_SIZE;
+        let size_x = rng.0.next() * (MAX_SIZE - MIN_SIZE) + MIN_SIZE;
+        let size_y = rng.0.next() * (MAX_SIZE - MIN_SIZE) + MIN_SIZE;
         let r = rng.0.next();
         let g = rng.0.next();
         let b = rng.0.next();
