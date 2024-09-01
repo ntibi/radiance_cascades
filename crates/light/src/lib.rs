@@ -30,11 +30,16 @@ impl Plugin for LightPlugin {
             Update,
             (
                 update_probes,
-                (debug_rays, (recreate_texture, write_to_texture).chain()),
+                (
+                    debug_mouse_rays.run_if(run_if_debug_mouse_rays),
+                    (recreate_texture, write_to_texture).chain(),
+                ),
             )
                 .chain(),
         )
         .register_type::<RadianceCascadeConfig>()
+        .register_type::<RadianceCascadeDebug>()
+        .init_resource::<RadianceCascadeDebug>()
         .insert_resource(RadianceCascadeConfig {
             cascades: 1,
             cascade_zero_spacing: 100,
@@ -42,6 +47,7 @@ impl Plugin for LightPlugin {
             cascade_zero_ray_length: 20,
         })
         .add_plugins(ResourceInspectorPlugin::<RadianceCascadeConfig>::default())
+        .add_plugins(ResourceInspectorPlugin::<RadianceCascadeDebug>::default())
         .add_plugins(Material2dPlugin::<Material>::default())
         .init_resource::<RadianceCascade>();
     }
@@ -59,6 +65,21 @@ struct RadianceCascadeConfig {
     pub cascade_zero_rays: usize,
     /// length of one ray on cascade zero
     pub cascade_zero_ray_length: usize,
+}
+
+#[derive(Reflect, Resource, Default, InspectorOptions)]
+#[reflect(Resource, InspectorOptions)]
+struct RadianceCascadeDebug {
+    pub rays: bool,
+    pub mouse: bool,
+}
+
+fn run_if_debug_mouse_rays(debug: Res<RadianceCascadeDebug>) -> bool {
+    debug.mouse
+}
+
+fn run_if_debug_rays(debug: Res<RadianceCascadeDebug>) -> bool {
+    debug.rays
 }
 
 #[derive(Resource, Default)]
@@ -138,6 +159,7 @@ fn next_power_of_two(v: u32) -> u32 {
 
 fn update_probes(
     conf: Res<RadianceCascadeConfig>,
+    debug: Res<RadianceCascadeDebug>,
     mut cascade: ResMut<RadianceCascade>,
     viewport: Res<Viewport>,
     emitters: Query<(&LightMaterial, &Transform)>,
@@ -199,11 +221,19 @@ fn update_probes(
         let end = start + Vec2::new(ray_angle.cos(), ray_angle.sin()) * ray_length as f32;
 
         cascade.data[ray] = if let Some((hit, toi)) = cast_ray(start, end, &emitters) {
-            gizmos.line_2d(start, start.lerp(end, toi / start.distance(end)), hit.color);
+            if debug.rays {
+                gizmos.line_2d(
+                    start,
+                    start.lerp(end, toi / start.distance(end)),
+                    colors[cascade_index],
+                );
+            }
             // TODO color strength ?
             hit.color
         } else {
-            gizmos.line_2d(start, end, Color::srgb(0.2, 0.2, 0.2));
+            if debug.rays {
+                gizmos.line_2d(start, end, colors[cascade_index]);
+            }
             Color::srgba(0., 0., 0., 0.)
         }
     }
@@ -315,7 +345,7 @@ fn write_to_texture(
     }
 }
 
-fn debug_rays(
+fn debug_mouse_rays(
     mouse: Res<Mouse>,
     conf: Res<RadianceCascadeConfig>,
     cascade: Res<RadianceCascade>,
