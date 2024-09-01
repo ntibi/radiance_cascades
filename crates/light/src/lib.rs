@@ -228,8 +228,7 @@ fn update_probes(
                     colors[cascade_index],
                 );
             }
-            // TODO color strength ?
-            hit.color
+            hit.color.with_alpha(1.)
         } else {
             if debug.rays {
                 gizmos.line_2d(start, end, colors[cascade_index]);
