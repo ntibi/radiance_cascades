@@ -122,12 +122,15 @@ const MAX_SIZE: f32 = 200.;
 const MIN_SIZE: f32 = 50.;
 const MAX_DIST_FROM_CENTER: f32 = 500.;
 
+#[derive(Component)]
+struct RandomEmitter;
+
 fn regen_shapes(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    shapes: Query<Entity, With<LightMaterial>>,
+    shapes: Query<Entity, With<(LightMaterial, RandomEmitter)>>,
     mut rng: ResMut<GlobalRng>,
 ) {
     let mut to_add = 0;
@@ -160,6 +163,7 @@ fn regen_shapes(
         let z = rng.0.next();
 
         commands.spawn((
+            RandomEmitter,
             MaterialMesh2dBundle {
                 mesh: Mesh2dHandle(meshes.add(Rectangle::new(size_x, size_y))),
                 material: materials.add(Color::srgb(r, g, b)),
