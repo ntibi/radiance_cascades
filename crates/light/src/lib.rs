@@ -29,6 +29,7 @@ impl Plugin for LightPlugin {
         app.add_systems(
             Update,
             (
+                mouse_emitter,
                 update_probes,
                 (
                     debug_mouse_rays.run_if(run_if_debug_mouse_rays),
@@ -71,11 +72,12 @@ struct RadianceCascadeConfig {
 #[reflect(Resource, InspectorOptions)]
 struct RadianceCascadeDebug {
     pub rays: bool,
-    pub mouse: bool,
+    pub mouse_rays: bool,
+    pub mouse_emitter: bool,
 }
 
 fn run_if_debug_mouse_rays(debug: Res<RadianceCascadeDebug>) -> bool {
-    debug.mouse
+    debug.mouse_rays
 }
 
 fn run_if_debug_rays(debug: Res<RadianceCascadeDebug>) -> bool {
@@ -507,4 +509,47 @@ fn force_texture_reload(
         let material = materials.get_mut(handle).unwrap();
         material.texture = material.texture.clone();
     }
+}
+
+#[derive(Component)]
+struct MouseEmitter;
+
+fn mouse_emitter(
+    mouse: Res<Mouse>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+    mut emitter_entity: Local<Option<Entity>>,
+    debug: Res<RadianceCascadeDebug>,
+) {
+    match (debug.mouse_emitter, *emitter_entity, mouse.0) {
+        (true, None, Some(mouse)) => {
+            let color = Color::srgb(1., 1., 1.);
+            let id = commands
+                .spawn((
+                    MouseEmitter,
+                    MaterialMesh2dBundle {
+                        mesh: Mesh2dHandle(meshes.add(Rectangle::new(32., 32.))),
+                        material: materials.add(color),
+                        transform: Transform::from_translation(mouse.extend(0.)),
+                        ..default()
+                    },
+                    LightMaterial {
+                        shape: Cuboid::new(Vector2::new(16., 16.)),
+                        color,
+                    },
+                ))
+                .id();
+            *emitter_entity = Some(id);
+        }
+        (true, Some(entity), Some(mouse)) => {
+            commands
+                .entity(entity)
+                .insert(Transform::from_translation(mouse.extend(0.)));
+        }
+        (false, Some(entity), _) => {
+            commands.entity(entity).despawn();
+        }
+        _ => {}
+    };
 }
