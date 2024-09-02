@@ -3,6 +3,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{
     AsBindGroup, Extent3d, ShaderRef, TextureDimension, TextureFormat,
 };
+use bevy::render::texture::ImageSampler;
 use bevy::sprite::{Material2d, Material2dPlugin, MaterialMesh2dBundle, Mesh2dHandle};
 use bevy::window::{PrimaryWindow, WindowResized};
 use bevy_inspector_egui::quick::ResourceInspectorPlugin;
@@ -32,6 +33,7 @@ impl Plugin for LightPlugin {
                 mouse_emitter,
                 update_probes,
                 (
+                    debug_texture,
                     debug_mouse_rays.run_if(run_if_debug_mouse_rays),
                     (recreate_texture, write_to_texture, force_texture_reload).chain(),
                 ),
@@ -74,6 +76,7 @@ struct RadianceCascadeDebug {
     pub rays: bool,
     pub mouse_rays: bool,
     pub mouse_emitter: bool,
+    pub cascade_view: bool,
 }
 
 fn run_if_debug_mouse_rays(debug: Res<RadianceCascadeDebug>) -> bool {
@@ -289,23 +292,6 @@ fn recreate_texture(
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
     );
-
-    // TODO add a debug view that renders the cascade data
-    //let image = Image::new(
-    //Extent3d {
-    //width: ??
-    //height: ??
-    //depth_or_array_layers: 1,
-    //},
-    //TextureDimension::D2,
-    //cascade
-    //.data
-    //.iter()
-    //.flat_map(|c| c.to_srgba().to_u8_array())
-    //.collect::<Vec<u8>>(),
-    //TextureFormat::Rgba8Unorm,
-    //RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
-    //);
 
     let handle = images.add(image);
 
@@ -540,8 +526,10 @@ fn mouse_emitter(
             *emitter_entity = Some(id);
         }
         (true, Some(entity), Some(mouse)) => {
+            let pos: Vec2 = (265.3103, -91.66961).into();
             commands
                 .entity(entity)
+                //.insert(Transform::from_translation(pos.extend(0.)));
                 .insert(Transform::from_translation(mouse.extend(0.)));
         }
         (false, Some(entity), _) => {
@@ -550,4 +538,74 @@ fn mouse_emitter(
         }
         _ => {}
     };
+}
+
+#[derive(Component)]
+struct DebugTexture;
+
+fn debug_texture(
+    conf: Res<RadianceCascadeConfig>,
+    debug: Res<RadianceCascadeDebug>,
+    cascade: Res<RadianceCascade>,
+    viewport: Res<Viewport>,
+    camera: Query<&Transform, With<Camera>>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<Material>>,
+    mut light_textures: Query<(Entity), With<DebugTexture>>,
+    mut gizmos: Gizmos,
+) {
+    for entity in light_textures.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    if !debug.cascade_view {
+        return;
+    }
+
+    let camera = camera.get_single().unwrap();
+    let camera_bottom_left = camera.translation.truncate() - viewport.world / 2.;
+
+    let cascade_zero_x_axis_probes =
+        next_power_of_two(viewport.world.x as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let cascade_zero_y_axis_probes =
+        next_power_of_two(viewport.world.y as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let rays_per_probe = conf.cascade_zero_rays;
+
+    let mut image = Image::new(
+        Extent3d {
+            width: cascade_zero_x_axis_probes as u32 * rays_per_probe as u32,
+            height: cascade_zero_y_axis_probes as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        cascade
+            .data
+            .chunks_exact(cascade_zero_x_axis_probes * rays_per_probe)
+            // to invert the y axis (to get it with bottom left origin
+            .rev()
+            .flat_map(|y| y.iter().flat_map(|c| c.to_srgba().to_u8_array()))
+            .collect::<Vec<u8>>(),
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+    );
+    image.sampler = ImageSampler::nearest();
+
+    let handle = images.add(image);
+
+    let size = viewport.world / 10.;
+    let origin = camera_bottom_left.with_y(camera_bottom_left.y + 500.);
+    commands.spawn((
+        DebugTexture,
+        MaterialMesh2dBundle {
+            mesh: Mesh2dHandle(meshes.add(Rectangle::new(size.x, size.y))),
+            material: materials.add(Material {
+                texture: Some(handle),
+            }),
+            transform: Transform::from_translation((origin + size / 2.).extend(100.)),
+            ..default()
+        },
+    ));
+    gizmos.rect_2d(origin + size / 2., 0., size, Color::srgb(1., 1., 1.));
 }
