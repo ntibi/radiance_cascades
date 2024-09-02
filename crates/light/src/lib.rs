@@ -349,7 +349,7 @@ fn write_to_texture(
             let image = images.get_mut(image_handle).unwrap();
             for i in 0..(viewport.logical.x as usize * viewport.logical.y as usize) {
                 let x = i as f32 % viewport.logical.x;
-                let y = i as f32 / viewport.logical.x;
+                let y = viewport.logical.y - i as f32 / viewport.logical.x;
                 let pixel = Vec2::new(x, y);
 
                 // TODO only did the interpolation for the first cascade
@@ -418,9 +418,6 @@ fn write_to_texture(
                     + bottom_left.unwrap_or(Srgba::BLACK)
                     + bottom_right.unwrap_or(Srgba::BLACK);
                 image.data[i * 4..i * 4 + 4].copy_from_slice(&color.to_u8_array());
-                //if color.alpha() > 0. && (color.red > 0. || color.green > 0. || color.blue > 0.) {
-                //image.data[i * 4..i * 4 + 4].copy_from_slice(&Srgba::RED.to_u8_array());
-                //}
             }
         }
     }
