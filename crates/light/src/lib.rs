@@ -32,7 +32,7 @@ impl Plugin for LightPlugin {
                 update_probes,
                 (
                     debug_mouse_rays.run_if(run_if_debug_mouse_rays),
-                    (recreate_texture, write_to_texture).chain(),
+                    (recreate_texture, write_to_texture, force_texture_reload).chain(),
                 ),
             )
                 .chain(),
@@ -325,20 +325,100 @@ fn write_to_texture(
     cascade: Res<RadianceCascade>,
     viewport: Res<Viewport>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<Material>>,
-    light_textures: Query<(Entity, &Handle<Material>), With<LightTexture>>,
+    materials: Res<Assets<Material>>,
+    light_texture: Query<(Entity, &Handle<Material>), With<LightTexture>>,
 ) {
-    if let Ok((_, handle)) = light_textures.get_single() {
+    //let camera = camera.get_single().unwrap();
+    //let camera_bottom_left = camera.translation.truncate() - viewport.world / 2.;
+
+    let cascade_zero_x_axis_probes =
+        next_power_of_two(viewport.world.x as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let cascade_zero_y_axis_probes =
+        next_power_of_two(viewport.world.y as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let cascade_zero_x_spacing = viewport.world.x / cascade_zero_x_axis_probes as f32;
+    let cascade_zero_y_spacing = viewport.world.y / cascade_zero_y_axis_probes as f32;
+    let rays_per_cascade =
+        cascade_zero_x_axis_probes * cascade_zero_y_axis_probes * conf.cascade_zero_rays;
+    let rays_count = rays_per_cascade * conf.cascades;
+
+    if let Ok((_, handle)) = light_texture.get_single() {
         let material = materials.get(handle).unwrap();
         if let Some(image_handle) = &material.texture {
-            let mut image = images.get_mut(image_handle).unwrap();
+            let image = images.get_mut(image_handle).unwrap();
             for i in 0..(viewport.logical.x as usize * viewport.logical.y as usize) {
-                let x = i % viewport.logical.x as usize;
-                let y = i / viewport.logical.x as usize;
+                let x = i as f32 % viewport.logical.x;
+                let y = i as f32 / viewport.logical.x;
+                let pixel = Vec2::new(x, y);
 
-                // TODO color from probe sampling
-                let color = Color::srgba(0., 0., 0., 0.);
-                image.data[i * 4..i * 4 + 4].copy_from_slice(&color.to_srgba().to_u8_array());
+                // TODO only did the interpolation for the first cascade
+                let cascade_index = 0;
+                let x_axis_probes = cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
+                let y_axis_probes = cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
+                let x_spacing = cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
+                let y_spacing = cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32;
+
+                let rays_per_probe = conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
+                let max_dist = ((x_spacing / 2.).powf(2.) + (y_spacing / 2.).powf(2.)).sqrt();
+
+                macro_rules! get_probe {
+                    ($name:ident, $dist_name:ident, $x_rounding_fn:ident, $y_rounding_fn:ident) => {
+                        let ($name, $dist_name) = {
+                            if x < x_spacing / 2. || y < y_spacing / 2. {
+                                (None, None)
+                            } else {
+                                let probe_x =
+                                    ((x - x_spacing / 2.) / x_spacing).$x_rounding_fn() as u32;
+                                let probe_y =
+                                    ((y - y_spacing / 2.) / y_spacing).$y_rounding_fn() as u32;
+                                if probe_x >= cascade_zero_x_axis_probes as u32
+                                    || probe_y >= cascade_zero_y_axis_probes as u32
+                                {
+                                    (None, None)
+                                } else {
+                                    let $dist_name = pixel.distance(Vec2::new(
+                                        probe_x as f32 * x_spacing + x_spacing / 2.,
+                                        probe_y as f32 * y_spacing + y_spacing / 2.,
+                                    ));
+                                    let $name = UVec2::new(probe_x, probe_y);
+                                    let i = $name.y as usize
+                                        * cascade_zero_x_axis_probes
+                                        * rays_per_probe
+                                        + $name.x as usize;
+                                    (
+                                        Some(Srgba::from_vec3(
+                                            cascade.data[i..i + rays_per_probe].iter().fold(
+                                                Vec3::new(0., 0., 0.),
+                                                |acc, c| {
+                                                    if c.alpha() > 0. {
+                                                        acc + c.to_srgba().to_vec3()
+                                                    } else {
+                                                        acc
+                                                    }
+                                                },
+                                            ) / rays_per_probe as f32,
+                                        )),
+                                        Some($dist_name),
+                                    )
+                                }
+                            }
+                        };
+                    };
+                }
+
+                get_probe!(bottom_left, bottom_left_dist, floor, floor);
+                get_probe!(bottom_right, bottom_right_dist, ceil, floor);
+                get_probe!(top_left, top_left_dist, floor, ceil);
+                get_probe!(top_right, top_right_dist, ceil, ceil);
+
+                // TODO real merge instead of just adding
+                let color = top_left.unwrap_or(Srgba::BLACK)
+                    + top_right.unwrap_or(Srgba::BLACK)
+                    + bottom_left.unwrap_or(Srgba::BLACK)
+                    + bottom_right.unwrap_or(Srgba::BLACK);
+                image.data[i * 4..i * 4 + 4].copy_from_slice(&color.to_u8_array());
+                //if color.alpha() > 0. && (color.red > 0. || color.green > 0. || color.blue > 0.) {
+                //image.data[i * 4..i * 4 + 4].copy_from_slice(&Srgba::RED.to_u8_array());
+                //}
             }
         }
     }
@@ -382,6 +462,8 @@ fn debug_mouse_rays(
 
             let rays_per_probe = conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
 
+            // TODO macro like in write_to_texture
+            // TODO bound check (u32 underflow and probe_xy > cascade_zero_xy_axis_probes)
             let probe_x = ((x - x_spacing / 2.) / x_spacing).floor() * x_spacing as f32
                 + x_spacing as f32 / 2.;
             let probe_y = ((y - y_spacing / 2.) / y_spacing).floor() * y_spacing as f32
@@ -412,5 +494,17 @@ fn debug_mouse_rays(
             gizmos.circle_2d(top_left, size, Color::srgb(0.2, 0.8, 0.2));
             gizmos.circle_2d(top_right, size, Color::srgb(0.2, 0.8, 0.2));
         }
+    }
+}
+
+fn force_texture_reload(
+    mut materials: ResMut<Assets<Material>>,
+    light_texture: Query<&Handle<Material>, With<LightTexture>>,
+) {
+    // TODO dirty way to force the updated texture to be sent to the gpu
+    // there is probably an idiomatic way to do this, but im too tired to think or look it up
+    for handle in light_texture.iter() {
+        let material = materials.get_mut(handle).unwrap();
+        material.texture = material.texture.clone();
     }
 }
