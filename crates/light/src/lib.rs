@@ -385,7 +385,7 @@ fn write_to_texture(
                                     let i = $name.y as usize
                                         * cascade_zero_x_axis_probes
                                         * rays_per_probe
-                                        + $name.x as usize;
+                                        + $name.x as usize * rays_per_probe;
                                     (
                                         Some(Srgba::from_vec3(
                                             cascade.data[i..i + rays_per_probe].iter().fold(
