@@ -130,7 +130,7 @@ fn regen_shapes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    shapes: Query<Entity, With<(LightMaterial, RandomEmitter)>>,
+    shapes: Query<Entity, (With<LightMaterial>, With<RandomEmitter>)>,
     mut rng: ResMut<GlobalRng>,
 ) {
     let mut to_add = 0;

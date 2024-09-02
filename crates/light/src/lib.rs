@@ -549,6 +549,7 @@ fn mouse_emitter(
         }
         (false, Some(entity), _) => {
             commands.entity(entity).despawn();
+            *emitter_entity = None;
         }
         _ => {}
     };
