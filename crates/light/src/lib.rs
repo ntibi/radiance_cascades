@@ -582,41 +582,51 @@ fn debug_texture(
         next_power_of_two(viewport.world.x as u32 / conf.cascade_zero_spacing as u32) as usize;
     let cascade_zero_y_axis_probes =
         next_power_of_two(viewport.world.y as u32 / conf.cascade_zero_spacing as u32) as usize;
-    let rays_per_probe = conf.cascade_zero_rays;
 
-    let mut image = Image::new(
-        Extent3d {
-            width: cascade_zero_x_axis_probes as u32 * rays_per_probe as u32,
-            height: cascade_zero_y_axis_probes as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        cascade
-            .data
-            .chunks_exact(cascade_zero_x_axis_probes * rays_per_probe)
-            // to invert the y axis (to get it with bottom left origin
-            .rev()
-            .flat_map(|y| y.iter().flat_map(|c| c.to_srgba().to_u8_array()))
-            .collect::<Vec<u8>>(),
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
-    );
-    image.sampler = ImageSampler::nearest();
+    for cascade_index in 0..conf.cascades {
+        let start = cascade_index
+            * cascade_zero_x_axis_probes
+            * cascade_zero_y_axis_probes
+            * conf.cascade_zero_rays;
+        let end = (cascade_index + 1)
+            * cascade_zero_x_axis_probes
+            * cascade_zero_y_axis_probes
+            * conf.cascade_zero_rays;
 
-    let handle = images.add(image);
+        let data = &cascade.data[start..end];
+        let mut image = Image::new(
+            Extent3d {
+                width: cascade_zero_x_axis_probes as u32 * conf.cascade_zero_rays as u32,
+                height: cascade_zero_y_axis_probes as u32,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            data.chunks_exact(cascade_zero_x_axis_probes * conf.cascade_zero_rays)
+                // to invert the y axis (to get it with bottom left origin
+                .rev()
+                .flat_map(|y| y.iter().flat_map(|c| c.to_srgba().to_u8_array()))
+                .collect::<Vec<u8>>(),
+            TextureFormat::Rgba8Unorm,
+            RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+        );
+        image.sampler = ImageSampler::nearest();
 
-    let size = viewport.world / 10.;
-    let origin = camera_bottom_left.with_y(camera_bottom_left.y + 500.);
-    commands.spawn((
-        DebugTexture,
-        MaterialMesh2dBundle {
-            mesh: Mesh2dHandle(meshes.add(Rectangle::new(size.x, size.y))),
-            material: materials.add(Material {
-                texture: Some(handle),
-            }),
-            transform: Transform::from_translation((origin + size / 2.).extend(100.)),
-            ..default()
-        },
-    ));
-    gizmos.rect_2d(origin + size / 2., 0., size, Color::srgb(1., 1., 1.));
+        let handle = images.add(image);
+
+        let size = viewport.world / 10.;
+        let mut origin = camera_bottom_left.with_y(camera_bottom_left.y + 600.);
+        origin -= Vec2::new(0., size.y * cascade_index as f32);
+        commands.spawn((
+            DebugTexture,
+            MaterialMesh2dBundle {
+                mesh: Mesh2dHandle(meshes.add(Rectangle::new(size.x, size.y))),
+                material: materials.add(Material {
+                    texture: Some(handle),
+                }),
+                transform: Transform::from_translation((origin + size / 2.).extend(100.)),
+                ..default()
+            },
+        ));
+        gizmos.rect_2d(origin + size / 2., 0., size, Color::srgb(1., 1., 1.));
+    }
 }
