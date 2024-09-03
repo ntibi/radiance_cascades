@@ -539,10 +539,8 @@ fn mouse_emitter(
             *emitter_entity = Some(id);
         }
         (true, Some(entity), Some(mouse)) => {
-            let pos: Vec2 = (265.3103, -91.66961).into();
             commands
                 .entity(entity)
-                //.insert(Transform::from_translation(pos.extend(0.)));
                 .insert(Transform::from_translation(mouse.extend(0.)));
         }
         (false, Some(entity), _) => {
