@@ -334,8 +334,20 @@ fn write_to_texture(
         if let Some(image_handle) = &material.texture {
             let image = images.get_mut(image_handle).unwrap();
             for i in 0..(viewport.logical.x as usize * viewport.logical.y as usize) {
-                let x = i as f32 % viewport.logical.x;
-                let y = viewport.logical.y - i as f32 / viewport.logical.x;
+                // cast everything as u32, so we dont get rounding errors
+                // ie:
+                // vp.x = 1920
+                // vp.y = 1124
+                // i1 1416239 and i2 1416240 are supposed to have the same y value
+                //   since they are on the same y axis
+                // but they will not
+                // y of i1 386.375555
+                // y of i2 386.375
+                // with all the rounding, they will both have 386
+                // its not perfect ? maybe i could just change the way i get x and y from i
+                // but it works, so ill keep it like this for now
+                let x = (i as u32 % viewport.logical.x as u32) as f32;
+                let y = (viewport.logical.y as u32 - i as u32 / viewport.logical.x as u32) as f32;
                 let pixel = Vec2::new(x, y);
 
                 // TODO only did the interpolation for the first cascade
@@ -358,6 +370,7 @@ fn write_to_texture(
                                     ((x - x_spacing / 2.) / x_spacing).$x_rounding_fn() as u32;
                                 let probe_y =
                                     ((y - y_spacing / 2.) / y_spacing).$y_rounding_fn() as u32;
+
                                 if probe_x >= cascade_zero_x_axis_probes as u32
                                     || probe_y >= cascade_zero_y_axis_probes as u32
                                 {
