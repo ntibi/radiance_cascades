@@ -5,7 +5,7 @@ use bevy::render::render_resource::{
 };
 use bevy::render::texture::ImageSampler;
 use bevy::sprite::{Material2d, Material2dPlugin, MaterialMesh2dBundle, Mesh2dHandle};
-use bevy::window::{PrimaryWindow, WindowResized};
+use bevy::window::WindowResized;
 use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use bevy_inspector_egui::{inspector_options::std_options::NumberDisplay, prelude::*};
 use parry2d::{
@@ -79,8 +79,6 @@ impl RadianceCascadeConfig {
 
         let cascade_zero_x_spacing = viewport.x / cascade_zero_x_axis_probes as f32;
         let cascade_zero_y_spacing = viewport.y / cascade_zero_y_axis_probes as f32;
-        let x_axis_probes = cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
-        let y_axis_probes = cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
         let spacing = Vec2::new(
             cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32,
             cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32,
@@ -98,12 +96,16 @@ impl RadianceCascadeConfig {
         [bottom_left, bottom_right, top_left, top_right]
     }
 
+    /// returns the indices of the 4 rays that are closest to the given angle
+    /// * `angle` - the angle to interpolate in radians
+    /// * `cascade_index` - the index of the cascade
     fn get_interpolated_angle_indices(&self, angle: f32, cascade_index: usize) -> [u32; 4] {
         let rays_per_probe = self.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
         let angle_offset = std::f32::consts::TAU / rays_per_probe as f32 / 2.;
+        let interval = std::f32::consts::TAU / rays_per_probe as f32;
 
-        let upper_neighbour = (angle + angle_offset).rem_euclid(rays_per_probe as f32) as u32;
-        let lower_neighbour = (angle - angle_offset).rem_euclid(rays_per_probe as f32) as u32;
+        let lower_neighbour = ((angle - angle_offset) / interval).floor() as u32;
+        let upper_neighbour = lower_neighbour + 1;
 
         [
             (lower_neighbour as i32 - 1).rem_euclid(rays_per_probe as i32) as u32,
@@ -248,7 +250,6 @@ fn update_probes(
     for ray in 0..rays_count {
         let cascade_index = ray / rays_per_cascade;
         let x_axis_probes = cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
-        let y_axis_probes = cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
         let x_spacing = cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
         let y_spacing = cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32;
 
@@ -305,15 +306,13 @@ struct LightTexture;
 
 fn recreate_texture(
     conf: Res<RadianceCascadeConfig>,
-    cascade: Res<RadianceCascade>,
     viewport: Res<Viewport>,
-    camera: Query<&Transform, With<Camera>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<Material>>,
     mut resize: EventReader<WindowResized>,
-    mut light_textures: Query<(Entity), With<LightTexture>>,
+    light_textures: Query<Entity, With<LightTexture>>,
 ) {
     if resize.read().next().is_none() {
         return;
@@ -328,9 +327,7 @@ fn recreate_texture(
         commands.entity(entity).despawn();
     }
 
-    let camera = camera.single();
-
-    let mut image = Image::new_fill(
+    let image = Image::new_fill(
         Extent3d {
             width: cascade_zero_x_axis_probes as u32,
             height: cascade_zero_y_axis_probes as u32,
@@ -365,9 +362,6 @@ fn write_to_texture(
     materials: Res<Assets<Material>>,
     light_texture: Query<(Entity, &Handle<Material>), With<LightTexture>>,
 ) {
-    //let camera = camera.get_single().unwrap();
-    //let camera_bottom_left = camera.translation.truncate() - viewport.world / 2.;
-
     let cascade_zero_x_axis_probes =
         next_power_of_two(viewport.world.x as u32 / conf.cascade_zero_spacing as u32) as usize;
     let cascade_zero_y_axis_probes =
@@ -376,7 +370,6 @@ fn write_to_texture(
     let cascade_zero_y_spacing = viewport.world.y / cascade_zero_y_axis_probes as f32;
     let rays_per_cascade =
         cascade_zero_x_axis_probes * cascade_zero_y_axis_probes * conf.cascade_zero_rays;
-    let rays_count = rays_per_cascade * conf.cascades;
 
     if let Ok((_, handle)) = light_texture.get_single() {
         let material = materials.get(handle).unwrap();
@@ -389,8 +382,6 @@ fn write_to_texture(
                 for ray in 0..rays_per_cascade {
                     let x_axis_probes =
                         cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
-                    let y_axis_probes =
-                        cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
                     let x_spacing =
                         cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
                     let y_spacing =
@@ -406,8 +397,6 @@ fn write_to_texture(
                         * std::f32::consts::TAU
                         + angle_offset;
 
-                    let color = data[cascade_index * rays_per_cascade + ray];
-
                     let probe_pos = Vec2::new(
                         probe_x as f32 * x_spacing + x_spacing / 2.,
                         probe_y as f32 * y_spacing + y_spacing / 2.,
@@ -415,8 +404,6 @@ fn write_to_texture(
 
                     let c1_x_axis_probes =
                         cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32 + 1);
-                    let c1_y_axis_probes =
-                        cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32 + 1);
                     let c1_rays_per_probe =
                         conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32 + 1);
                     let probes = conf.get_bilinear(viewport.world, probe_pos, cascade_index + 1);
@@ -474,10 +461,8 @@ fn write_to_texture(
 fn debug_mouse_rays(
     mouse: Res<Mouse>,
     conf: Res<RadianceCascadeConfig>,
-    cascade: Res<RadianceCascade>,
     viewport: Res<Viewport>,
     mut gizmos: Gizmos,
-    windows: Query<&Window, With<PrimaryWindow>>,
     camera: Query<&Transform, With<Camera>>,
 ) {
     let camera = camera.get_single().unwrap();
@@ -489,58 +474,48 @@ fn debug_mouse_rays(
         next_power_of_two(viewport.world.y as u32 / conf.cascade_zero_spacing as u32) as usize;
     let cascade_zero_x_spacing = viewport.world.x / cascade_zero_x_axis_probes as f32;
     let cascade_zero_y_spacing = viewport.world.y / cascade_zero_y_axis_probes as f32;
-    let rays_per_cascade =
-        cascade_zero_x_axis_probes * cascade_zero_y_axis_probes * conf.cascade_zero_rays;
-    let rays_count = rays_per_cascade * conf.cascades;
-    let window = windows.single();
 
-    if let Some(world_position) = mouse.0 {
-        let Some(cursor) = mouse.0 else {
-            return;
-        };
-        // world pos but with the camera as origin
-        let (x, y) = (cursor - camera_bottom_left).into();
+    let Some(cursor) = mouse.0 else {
+        return;
+    };
+    // world pos but with the camera as origin
+    let (x, y) = (cursor - camera_bottom_left).into();
 
-        for cascade_index in (0..conf.cascades).rev() {
-            let x_axis_probes = cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
-            let y_axis_probes = cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
-            let x_spacing = cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
-            let y_spacing = cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32;
+    for cascade_index in (0..conf.cascades).rev() {
+        let x_spacing = cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
+        let y_spacing = cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32;
 
-            let rays_per_probe = conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
+        // TODO macro like in write_to_texture
+        // TODO bound check (u32 underflow and probe_xy > cascade_zero_xy_axis_probes)
+        let probe_x =
+            ((x - x_spacing / 2.) / x_spacing).floor() * x_spacing as f32 + x_spacing as f32 / 2.;
+        let probe_y =
+            ((y - y_spacing / 2.) / y_spacing).floor() * y_spacing as f32 + y_spacing as f32 / 2.;
+        let bottom_left = camera_bottom_left + Vec2::new(probe_x, probe_y);
 
-            // TODO macro like in write_to_texture
-            // TODO bound check (u32 underflow and probe_xy > cascade_zero_xy_axis_probes)
-            let probe_x = ((x - x_spacing / 2.) / x_spacing).floor() * x_spacing as f32
-                + x_spacing as f32 / 2.;
-            let probe_y = ((y - y_spacing / 2.) / y_spacing).floor() * y_spacing as f32
-                + y_spacing as f32 / 2.;
-            let bottom_left = camera_bottom_left + Vec2::new(probe_x, probe_y);
+        let probe_x =
+            ((x - x_spacing / 2.) / x_spacing).ceil() * x_spacing as f32 + x_spacing as f32 / 2.;
+        let probe_y =
+            ((y - y_spacing / 2.) / y_spacing).floor() * y_spacing as f32 + y_spacing as f32 / 2.;
+        let bottom_right = camera_bottom_left + Vec2::new(probe_x, probe_y);
 
-            let probe_x = ((x - x_spacing / 2.) / x_spacing).ceil() * x_spacing as f32
-                + x_spacing as f32 / 2.;
-            let probe_y = ((y - y_spacing / 2.) / y_spacing).floor() * y_spacing as f32
-                + y_spacing as f32 / 2.;
-            let bottom_right = camera_bottom_left + Vec2::new(probe_x, probe_y);
+        let probe_x =
+            ((x - x_spacing / 2.) / x_spacing).floor() * x_spacing as f32 + x_spacing as f32 / 2.;
+        let probe_y =
+            ((y - y_spacing / 2.) / y_spacing).ceil() * y_spacing as f32 + y_spacing as f32 / 2.;
+        let top_left = camera_bottom_left + Vec2::new(probe_x, probe_y);
 
-            let probe_x = ((x - x_spacing / 2.) / x_spacing).floor() * x_spacing as f32
-                + x_spacing as f32 / 2.;
-            let probe_y = ((y - y_spacing / 2.) / y_spacing).ceil() * y_spacing as f32
-                + y_spacing as f32 / 2.;
-            let top_left = camera_bottom_left + Vec2::new(probe_x, probe_y);
+        let probe_x =
+            ((x - x_spacing / 2.) / x_spacing).ceil() * x_spacing as f32 + x_spacing as f32 / 2.;
+        let probe_y =
+            ((y - y_spacing / 2.) / y_spacing).ceil() * y_spacing as f32 + y_spacing as f32 / 2.;
+        let top_right = camera_bottom_left + Vec2::new(probe_x, probe_y);
 
-            let probe_x = ((x - x_spacing / 2.) / x_spacing).ceil() * x_spacing as f32
-                + x_spacing as f32 / 2.;
-            let probe_y = ((y - y_spacing / 2.) / y_spacing).ceil() * y_spacing as f32
-                + y_spacing as f32 / 2.;
-            let top_right = camera_bottom_left + Vec2::new(probe_x, probe_y);
-
-            let size = 4. * (1. + cascade_index as f32);
-            gizmos.circle_2d(bottom_left, size, Color::srgb(0.2, 0.8, 0.2));
-            gizmos.circle_2d(bottom_right, size, Color::srgb(0.2, 0.8, 0.2));
-            gizmos.circle_2d(top_left, size, Color::srgb(0.2, 0.8, 0.2));
-            gizmos.circle_2d(top_right, size, Color::srgb(0.2, 0.8, 0.2));
-        }
+        let size = 4. * (1. + cascade_index as f32);
+        gizmos.circle_2d(bottom_left, size, Color::srgb(0.2, 0.8, 0.2));
+        gizmos.circle_2d(bottom_right, size, Color::srgb(0.2, 0.8, 0.2));
+        gizmos.circle_2d(top_left, size, Color::srgb(0.2, 0.8, 0.2));
+        gizmos.circle_2d(top_right, size, Color::srgb(0.2, 0.8, 0.2));
     }
 }
 
@@ -613,7 +588,7 @@ fn debug_texture(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<Material>>,
-    mut light_textures: Query<(Entity), With<DebugTexture>>,
+    light_textures: Query<Entity, With<DebugTexture>>,
     mut gizmos: Gizmos,
 ) {
     for entity in light_textures.iter() {
