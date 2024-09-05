@@ -116,6 +116,90 @@ impl RadianceCascadeConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cascade_zero() {
+        let c = RadianceCascadeConfig {
+            cascades: 1,
+            cascade_zero_spacing: 100,
+            cascade_zero_rays: 4,
+            cascade_zero_ray_length: 20,
+        };
+
+        let offset = std::f32::consts::PI / 4.;
+        let mut r = c.get_interpolated_angle_indices(offset, 0).to_vec();
+        r.sort();
+        assert_eq!(r, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn cascade_zero_8rays() {
+        let c = RadianceCascadeConfig {
+            cascades: 1,
+            cascade_zero_spacing: 100,
+            cascade_zero_rays: 8,
+            cascade_zero_ray_length: 20,
+        };
+
+        let offset = std::f32::consts::PI / 8.;
+        let mut r = c.get_interpolated_angle_indices(offset, 0).to_vec();
+        r.sort();
+        assert_eq!(r, vec![0, 1, 2, 7]);
+    }
+
+    #[test]
+    fn cascade_one() {
+        let c = RadianceCascadeConfig {
+            cascades: 2,
+            cascade_zero_spacing: 100,
+            cascade_zero_rays: 4,
+            cascade_zero_ray_length: 20,
+        };
+
+        let offset = std::f32::consts::PI / 16.;
+        let mut r = c.get_interpolated_angle_indices(offset, 1).to_vec();
+        r.sort();
+        assert_eq!(r, vec![0, 1, 2, 15]);
+    }
+
+    #[test]
+    fn cascade_one_half_pi() {
+        let c = RadianceCascadeConfig {
+            cascades: 2,
+            cascade_zero_spacing: 100,
+            cascade_zero_rays: 4,
+            cascade_zero_ray_length: 20,
+        };
+
+        let offset = std::f32::consts::PI / 16.;
+        let mut r = c
+            .get_interpolated_angle_indices(std::f32::consts::PI / 2. + offset, 1)
+            .to_vec();
+        r.sort();
+        assert_eq!(r, vec![3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn cascade_one_pi() {
+        let c = RadianceCascadeConfig {
+            cascades: 2,
+            cascade_zero_spacing: 100,
+            cascade_zero_rays: 4,
+            cascade_zero_ray_length: 20,
+        };
+
+        let offset = std::f32::consts::PI / 16.;
+        let mut r = c
+            .get_interpolated_angle_indices(std::f32::consts::PI + offset, 1)
+            .to_vec();
+        r.sort();
+        assert_eq!(r, vec![7, 8, 9, 10]);
+    }
+}
+
 #[derive(Reflect, Resource, Default, InspectorOptions)]
 #[reflect(Resource, InspectorOptions)]
 struct RadianceCascadeDebug {
