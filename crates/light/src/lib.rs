@@ -71,11 +71,18 @@ struct RadianceCascadeConfig {
 }
 
 impl RadianceCascadeConfig {
-    pub fn get_bilinear(&self, viewport: Vec2, pos: Vec2, cascade_index: usize) -> [UVec2; 4] {
+    pub fn get_bilinear(
+        &self,
+        viewport: Vec2,
+        pos: Vec2,
+        cascade_index: usize,
+    ) -> [(UVec2, f32); 4] {
         let cascade_zero_x_axis_probes =
             next_power_of_two(viewport.x as u32 / self.cascade_zero_spacing as u32) as usize;
         let cascade_zero_y_axis_probes =
             next_power_of_two(viewport.y as u32 / self.cascade_zero_spacing as u32) as usize;
+        let x_axis_probes = cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
+        let y_axis_probes = cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
 
         let cascade_zero_x_spacing = viewport.x / cascade_zero_x_axis_probes as f32;
         let cascade_zero_y_spacing = viewport.y / cascade_zero_y_axis_probes as f32;
@@ -84,16 +91,33 @@ impl RadianceCascadeConfig {
             cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32,
         );
 
-        // TODO its gonna underflow
-        // add 1 probe width around the whole thing ?
-        // just ignore oob probes ?
-        let bottom_left = ((pos - spacing / 2.) / spacing).floor().as_uvec2();
-        let bottom_right = bottom_left + UVec2::new(1, 0);
-        let top_left = bottom_left + UVec2::new(0, 1);
-        let top_right = bottom_left + UVec2::new(1, 1);
+        let bottom_left = ((pos - spacing / 2.) / spacing).floor().as_ivec2();
+        let bottom_right = bottom_left + IVec2::new(1, 0);
+        let top_left = bottom_left + IVec2::new(0, 1);
+        let top_right = bottom_left + IVec2::new(1, 1);
 
-        // TODO add weight (with fract)
-        [bottom_left, bottom_right, top_left, top_right]
+        let fract = ((pos - spacing / 2.) / spacing).fract_gl();
+        let min = IVec2::ZERO;
+        let max = IVec2::new(x_axis_probes as i32 - 1, y_axis_probes as i32 - 1);
+
+        [
+            (
+                bottom_left.clamp(min, max).as_uvec2(),
+                fract.distance(Vec2::ZERO),
+            ),
+            (
+                bottom_right.clamp(min, max).as_uvec2(),
+                fract.distance(Vec2::new(0., 1.)),
+            ),
+            (
+                top_left.clamp(min, max).as_uvec2(),
+                fract.distance(Vec2::new(1., 0.)),
+            ),
+            (
+                top_right.clamp(min, max).as_uvec2(),
+                fract.distance(Vec2::new(1., 1.)),
+            ),
+        ]
     }
 
     /// returns the indices of the 4 rays that are closest to the given angle
@@ -489,7 +513,7 @@ fn write_to_texture(
                     let probes = conf.get_bilinear(viewport.world, probe_pos, cascade_index + 1);
 
                     let mut colors = Vec::new();
-                    for probe in probes {
+                    for (probe, weight) in probes {
                         let i = probe.x as usize * c1_rays_per_probe
                             + probe.y as usize * c1_x_axis_probes * c1_rays_per_probe;
 
