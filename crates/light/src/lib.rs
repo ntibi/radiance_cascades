@@ -71,6 +71,8 @@ struct RadianceCascadeConfig {
 }
 
 impl RadianceCascadeConfig {
+    /// gets a list of the 4 probes (xy indices) that are closest to the given position
+    /// and their weights for bilinear interpolation
     pub fn get_bilinear(
         &self,
         viewport: Vec2,
@@ -578,44 +580,38 @@ fn debug_mouse_rays(
     let Some(cursor) = mouse.0 else {
         return;
     };
-    // world pos but with the camera as origin
-    let (x, y) = (cursor - camera_bottom_left).into();
+    let xy = cursor - camera_bottom_left;
 
     for cascade_index in (0..conf.cascades).rev() {
-        let x_spacing = cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
-        let y_spacing = cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32;
+        let spacing = Vec2::new(
+            cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32,
+            cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32,
+        );
 
-        // TODO macro like in write_to_texture
-        // TODO bound check (u32 underflow and probe_xy > cascade_zero_xy_axis_probes)
-        let probe_x =
-            ((x - x_spacing / 2.) / x_spacing).floor() * x_spacing as f32 + x_spacing as f32 / 2.;
-        let probe_y =
-            ((y - y_spacing / 2.) / y_spacing).floor() * y_spacing as f32 + y_spacing as f32 / 2.;
-        let bottom_left = camera_bottom_left + Vec2::new(probe_x, probe_y);
-
-        let probe_x =
-            ((x - x_spacing / 2.) / x_spacing).ceil() * x_spacing as f32 + x_spacing as f32 / 2.;
-        let probe_y =
-            ((y - y_spacing / 2.) / y_spacing).floor() * y_spacing as f32 + y_spacing as f32 / 2.;
-        let bottom_right = camera_bottom_left + Vec2::new(probe_x, probe_y);
-
-        let probe_x =
-            ((x - x_spacing / 2.) / x_spacing).floor() * x_spacing as f32 + x_spacing as f32 / 2.;
-        let probe_y =
-            ((y - y_spacing / 2.) / y_spacing).ceil() * y_spacing as f32 + y_spacing as f32 / 2.;
-        let top_left = camera_bottom_left + Vec2::new(probe_x, probe_y);
-
-        let probe_x =
-            ((x - x_spacing / 2.) / x_spacing).ceil() * x_spacing as f32 + x_spacing as f32 / 2.;
-        let probe_y =
-            ((y - y_spacing / 2.) / y_spacing).ceil() * y_spacing as f32 + y_spacing as f32 / 2.;
-        let top_right = camera_bottom_left + Vec2::new(probe_x, probe_y);
+        let [(bottom_left, _), (bottom_right, _), (top_left, _), (top_right, _)] =
+            conf.get_bilinear(viewport.world, xy, cascade_index);
 
         let size = 4. * (1. + cascade_index as f32);
-        gizmos.circle_2d(bottom_left, size, Color::srgb(0.2, 0.8, 0.2));
-        gizmos.circle_2d(bottom_right, size, Color::srgb(0.2, 0.8, 0.2));
-        gizmos.circle_2d(top_left, size, Color::srgb(0.2, 0.8, 0.2));
-        gizmos.circle_2d(top_right, size, Color::srgb(0.2, 0.8, 0.2));
+        gizmos.circle_2d(
+            camera_bottom_left + (bottom_left.as_vec2()) * spacing + spacing / 2.,
+            size,
+            Color::srgb(0.2, 0.8, 0.2),
+        );
+        gizmos.circle_2d(
+            camera_bottom_left + (bottom_right.as_vec2()) * spacing + spacing / 2.,
+            size,
+            Color::srgb(0.2, 0.8, 0.2),
+        );
+        gizmos.circle_2d(
+            camera_bottom_left + (top_left.as_vec2()) * spacing + spacing / 2.,
+            size,
+            Color::srgb(0.2, 0.8, 0.2),
+        );
+        gizmos.circle_2d(
+            camera_bottom_left + (top_right.as_vec2()) * spacing + spacing / 2.,
+            size,
+            Color::srgb(0.2, 0.8, 0.2),
+        );
     }
 }
 
