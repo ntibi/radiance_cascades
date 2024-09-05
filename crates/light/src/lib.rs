@@ -42,13 +42,13 @@ impl Plugin for LightPlugin {
         )
         .register_type::<RadianceCascadeConfig>()
         .register_type::<RadianceCascadeDebug>()
-        .init_resource::<RadianceCascadeDebug>()
         .insert_resource(RadianceCascadeConfig {
             cascades: 1,
             cascade_zero_spacing: 100,
             cascade_zero_rays: 4,
             cascade_zero_ray_length: 20,
         })
+        .init_resource::<RadianceCascadeDebug>()
         .add_plugins(ResourceInspectorPlugin::<RadianceCascadeConfig>::default())
         .add_plugins(ResourceInspectorPlugin::<RadianceCascadeDebug>::default())
         .add_plugins(Material2dPlugin::<Material>::default())
