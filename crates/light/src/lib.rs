@@ -496,10 +496,6 @@ fn write_to_texture(
                         let angle_indices =
                             conf.get_interpolated_angle_indices(ray_angle, cascade_index + 1);
                         for angle_index in angle_indices.iter() {
-                            println!(
-                                "angle index {}, rays per probe {}",
-                                angle_index, c1_rays_per_probe
-                            );
                             colors.push(
                                 data[cascade_index * rays_per_cascade + i + *angle_index as usize],
                             );
