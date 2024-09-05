@@ -390,7 +390,7 @@ fn update_probes(
                 gizmos.line_2d(start, end, colors[cascade_index]);
             }
             Color::srgba(0., 0., 0., 0.)
-        }
+        };
     }
 }
 
@@ -514,28 +514,23 @@ fn write_to_texture(
                         conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32 + 1);
                     let probes = conf.get_bilinear(viewport.world, probe_pos, cascade_index + 1);
 
-                    let mut colors = Vec::new();
+                    let mut color: Vec4 = Vec4::ZERO;
                     for (probe, weight) in probes {
-                        let i = probe.x as usize * c1_rays_per_probe
+                        let i = (cascade_index + 1) * rays_per_cascade
+                            + probe.x as usize * c1_rays_per_probe
                             + probe.y as usize * c1_x_axis_probes * c1_rays_per_probe;
 
+                        let mut probe_color: Vec4 = Vec4::ZERO;
                         let angle_indices =
                             conf.get_interpolated_angle_indices(ray_angle, cascade_index + 1);
                         for angle_index in angle_indices.iter() {
-                            colors.push(
-                                data[cascade_index * rays_per_cascade + i + *angle_index as usize],
-                            );
+                            probe_color += data[i + *angle_index as usize].to_srgba().to_vec4();
                         }
+                        color += probe_color / angle_indices.len() as f32 * weight;
                     }
-                    let color = Srgba::from_vec4(
-                        colors
-                            .iter()
-                            .fold(Vec4::ZERO, |acc, c| acc + c.to_srgba().to_vec4())
-                            / colors.len() as f32,
-                    );
 
                     let i = cascade_index * rays_per_cascade + ray;
-                    data[i] = Color::from(color);
+                    data[i] = Color::from(Srgba::from_vec4(color));
                 }
             }
 
