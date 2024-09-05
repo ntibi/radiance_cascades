@@ -70,6 +70,50 @@ struct RadianceCascadeConfig {
     pub cascade_zero_ray_length: usize,
 }
 
+impl RadianceCascadeConfig {
+    pub fn get_bilinear(&self, viewport: Vec2, pos: Vec2, cascade_index: usize) -> [UVec2; 4] {
+        let cascade_zero_x_axis_probes =
+            next_power_of_two(viewport.x as u32 / self.cascade_zero_spacing as u32) as usize;
+        let cascade_zero_y_axis_probes =
+            next_power_of_two(viewport.y as u32 / self.cascade_zero_spacing as u32) as usize;
+
+        let cascade_zero_x_spacing = viewport.x / cascade_zero_x_axis_probes as f32;
+        let cascade_zero_y_spacing = viewport.y / cascade_zero_y_axis_probes as f32;
+        let x_axis_probes = cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
+        let y_axis_probes = cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
+        let spacing = Vec2::new(
+            cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32,
+            cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32,
+        );
+
+        // TODO its gonna underflow
+        // add 1 probe width around the whole thing ?
+        // just ignore oob probes ?
+        let bottom_left = ((pos - spacing / 2.) / spacing).floor().as_uvec2();
+        let bottom_right = bottom_left + UVec2::new(1, 0);
+        let top_left = bottom_left + UVec2::new(0, 1);
+        let top_right = bottom_left + UVec2::new(1, 1);
+
+        // TODO add weight (with fract)
+        [bottom_left, bottom_right, top_left, top_right]
+    }
+
+    fn get_interpolated_angle_indices(&self, angle: f32, cascade_index: usize) -> [u32; 4] {
+        let rays_per_probe = self.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
+        let angle_offset = std::f32::consts::TAU / rays_per_probe as f32 / 2.;
+
+        let upper_neighbour = (angle + angle_offset).rem_euclid(rays_per_probe as f32) as u32;
+        let lower_neighbour = (angle - angle_offset).rem_euclid(rays_per_probe as f32) as u32;
+
+        [
+            (lower_neighbour as i32 - 1).rem_euclid(rays_per_probe as i32) as u32,
+            lower_neighbour,
+            upper_neighbour,
+            (upper_neighbour + 1).rem_euclid(rays_per_probe as u32) as u32,
+        ]
+    }
+}
+
 #[derive(Reflect, Resource, Default, InspectorOptions)]
 #[reflect(Resource, InspectorOptions)]
 struct RadianceCascadeDebug {
@@ -275,6 +319,11 @@ fn recreate_texture(
         return;
     }
 
+    let cascade_zero_x_axis_probes =
+        next_power_of_two(viewport.world.x as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let cascade_zero_y_axis_probes =
+        next_power_of_two(viewport.world.y as u32 / conf.cascade_zero_spacing as u32) as usize;
+
     for entity in light_textures.iter() {
         commands.entity(entity).despawn();
     }
@@ -283,8 +332,8 @@ fn recreate_texture(
 
     let mut image = Image::new_fill(
         Extent3d {
-            width: viewport.logical.x as u32,
-            height: viewport.logical.y as u32,
+            width: cascade_zero_x_axis_probes as u32,
+            height: cascade_zero_y_axis_probes as u32,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -333,90 +382,90 @@ fn write_to_texture(
         let material = materials.get(handle).unwrap();
         if let Some(image_handle) = &material.texture {
             let image = images.get_mut(image_handle).unwrap();
-            for i in 0..(viewport.logical.x as usize * viewport.logical.y as usize) {
-                // cast everything as u32, so we dont get rounding errors
-                // ie:
-                // vp.x = 1920
-                // vp.y = 1124
-                // i1 1416239 and i2 1416240 are supposed to have the same y value
-                //   since they are on the same y axis
-                // but they will not
-                // y of i1 386.375555
-                // y of i2 386.375
-                // with all the rounding, they will both have 386
-                // its not perfect ? maybe i could just change the way i get x and y from i
-                // but it works, so ill keep it like this for now
-                let x = (i as u32 % viewport.logical.x as u32) as f32;
-                let y = (viewport.logical.y as u32 - i as u32 / viewport.logical.x as u32) as f32;
-                let pixel = Vec2::new(x, y);
 
-                // TODO only did the interpolation for the first cascade
-                let cascade_index = 0;
-                let x_axis_probes = cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
-                let y_axis_probes = cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
-                let x_spacing = cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
-                let y_spacing = cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32;
+            let mut data = cascade.data.clone();
 
-                let rays_per_probe = conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
-                let max_dist = ((x_spacing / 2.).powf(2.) + (y_spacing / 2.).powf(2.)).sqrt();
+            for cascade_index in (0..(conf.cascades - 1)).rev() {
+                for ray in 0..rays_per_cascade {
+                    let x_axis_probes =
+                        cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32);
+                    let y_axis_probes =
+                        cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32);
+                    let x_spacing =
+                        cascade_zero_x_spacing * 2_usize.pow(cascade_index as u32) as f32;
+                    let y_spacing =
+                        cascade_zero_y_spacing * 2_usize.pow(cascade_index as u32) as f32;
 
-                macro_rules! get_probe {
-                    ($name:ident, $dist_name:ident, $x_rounding_fn:ident, $y_rounding_fn:ident) => {
-                        let ($name, $dist_name) = {
-                            if x < x_spacing / 2. || y < y_spacing / 2. {
-                                (None, None)
-                            } else {
-                                let probe_x =
-                                    ((x - x_spacing / 2.) / x_spacing).$x_rounding_fn() as u32;
-                                let probe_y =
-                                    ((y - y_spacing / 2.) / y_spacing).$y_rounding_fn() as u32;
+                    let rays_per_probe = conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32);
 
-                                if probe_x >= cascade_zero_x_axis_probes as u32
-                                    || probe_y >= cascade_zero_y_axis_probes as u32
-                                {
-                                    (None, None)
-                                } else {
-                                    let $dist_name = pixel.distance(Vec2::new(
-                                        probe_x as f32 * x_spacing + x_spacing / 2.,
-                                        probe_y as f32 * y_spacing + y_spacing / 2.,
-                                    ));
-                                    let $name = UVec2::new(probe_x, probe_y);
-                                    let i = $name.y as usize
-                                        * cascade_zero_x_axis_probes
-                                        * rays_per_probe
-                                        + $name.x as usize * rays_per_probe;
-                                    (
-                                        Some(Srgba::from_vec3(
-                                            cascade.data[i..i + rays_per_probe].iter().fold(
-                                                Vec3::new(0., 0., 0.),
-                                                |acc, c| {
-                                                    if c.alpha() > 0. {
-                                                        acc + c.to_srgba().to_vec3()
-                                                    } else {
-                                                        acc
-                                                    }
-                                                },
-                                            ) / rays_per_probe as f32,
-                                        )),
-                                        Some($dist_name),
-                                    )
-                                }
-                            }
-                        };
-                    };
+                    let probe_x = (ray / rays_per_probe) % x_axis_probes;
+                    let probe_y = (ray / rays_per_probe) / x_axis_probes;
+                    let angle_offset = std::f32::consts::TAU / rays_per_probe as f32 / 2.;
+                    let ray_index = ray % rays_per_probe;
+                    let ray_angle = (ray_index as f32 / rays_per_probe as f32)
+                        * std::f32::consts::TAU
+                        + angle_offset;
+
+                    let color = data[cascade_index * rays_per_cascade + ray];
+
+                    let probe_pos = Vec2::new(
+                        probe_x as f32 * x_spacing + x_spacing / 2.,
+                        probe_y as f32 * y_spacing + y_spacing / 2.,
+                    );
+
+                    let c1_x_axis_probes =
+                        cascade_zero_x_axis_probes / 2_usize.pow(cascade_index as u32 + 1);
+                    let c1_y_axis_probes =
+                        cascade_zero_y_axis_probes / 2_usize.pow(cascade_index as u32 + 1);
+                    let c1_rays_per_probe =
+                        conf.cascade_zero_rays * 4_usize.pow(cascade_index as u32 + 1);
+                    let probes = conf.get_bilinear(viewport.world, probe_pos, cascade_index + 1);
+
+                    let mut colors = Vec::new();
+                    for probe in probes {
+                        let i = probe.x as usize * c1_rays_per_probe
+                            + probe.y as usize * c1_x_axis_probes * c1_rays_per_probe;
+
+                        let angle_indices =
+                            conf.get_interpolated_angle_indices(ray_angle, cascade_index + 1);
+                        for angle_index in angle_indices.iter() {
+                            println!(
+                                "angle index {}, rays per probe {}",
+                                angle_index, c1_rays_per_probe
+                            );
+                            colors.push(
+                                data[cascade_index * rays_per_cascade + i + *angle_index as usize],
+                            );
+                        }
+                    }
+                    let color = Srgba::from_vec4(
+                        colors
+                            .iter()
+                            .fold(Vec4::ZERO, |acc, c| acc + c.to_srgba().to_vec4())
+                            / colors.len() as f32,
+                    );
+
+                    let i = cascade_index * rays_per_cascade + ray;
+                    data[i] = Color::from(color);
                 }
+            }
 
-                get_probe!(bottom_left, bottom_left_dist, floor, floor);
-                get_probe!(bottom_right, bottom_right_dist, ceil, floor);
-                get_probe!(top_left, top_left_dist, floor, ceil);
-                get_probe!(top_right, top_right_dist, ceil, ceil);
-
-                // TODO real merge instead of just adding
-                let color = top_left.unwrap_or(Srgba::BLACK)
-                    + top_right.unwrap_or(Srgba::BLACK)
-                    + bottom_left.unwrap_or(Srgba::BLACK)
-                    + bottom_right.unwrap_or(Srgba::BLACK);
-                image.data[i * 4..i * 4 + 4].copy_from_slice(&color.to_u8_array());
+            for (i, c) in data
+                .chunks_exact(conf.cascade_zero_rays)
+                .take(cascade_zero_x_axis_probes * cascade_zero_y_axis_probes)
+                .enumerate()
+            {
+                let x = i % cascade_zero_x_axis_probes;
+                let y = cascade_zero_y_axis_probes - 1 - i / cascade_zero_x_axis_probes;
+                let flipped = y * cascade_zero_x_axis_probes + x;
+                image.data[flipped * 4..flipped * 4 + 4].copy_from_slice(
+                    &Srgba::from_vec4(
+                        c.iter()
+                            .fold(Vec4::ZERO, |acc, c| acc + c.to_srgba().to_vec4())
+                            / c.len() as f32,
+                    )
+                    .to_u8_array(),
+                );
             }
         }
     }
