@@ -213,10 +213,6 @@ fn run_if_debug_mouse_rays(debug: Res<RadianceCascadeDebug>) -> bool {
     debug.mouse_rays
 }
 
-fn run_if_debug_rays(debug: Res<RadianceCascadeDebug>) -> bool {
-    debug.rays
-}
-
 #[derive(Resource, Default)]
 struct RadianceCascade {
     pub data: Vec<Color>,
