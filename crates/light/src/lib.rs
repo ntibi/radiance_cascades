@@ -363,17 +363,21 @@ fn update_probes(
         let probe_index = (ray - rays_per_cascade * cascade_index) / rays_per_probe;
         let ray_index = (ray - rays_per_cascade * cascade_index) % rays_per_probe;
         let ray_length = conf.cascade_zero_ray_length * 4_usize.pow(cascade_index as u32);
+        let ray_offset =
+            conf.cascade_zero_ray_length * 4_usize.pow((cascade_index as i32 - 1).max(0) as u32);
 
         let probe_x =
             (probe_index % x_axis_probes) as f32 * x_spacing as f32 + x_spacing as f32 / 2.;
         let probe_y =
             (probe_index / x_axis_probes) as f32 * y_spacing as f32 + y_spacing as f32 / 2.;
 
-        let angle_offset = std::f32::consts::TAU / rays_per_probe as f32 / 2.; // TODO
+        let angle_offset = std::f32::consts::TAU / rays_per_probe as f32 / 2.;
         let ray_angle =
             (ray_index as f32 / rays_per_probe as f32) * std::f32::consts::TAU + angle_offset;
 
-        let start = camera_bottom_left + Vec2::new(probe_x, probe_y);
+        let start = camera_bottom_left
+            + Vec2::new(probe_x, probe_y)
+            + Vec2::new(ray_angle.cos(), ray_angle.sin()) * ray_offset as f32;
         let end = start + Vec2::new(ray_angle.cos(), ray_angle.sin()) * ray_length as f32;
 
         cascade.data[ray] = if let Some((hit, toi)) = cast_ray(start, end, &emitters) {
