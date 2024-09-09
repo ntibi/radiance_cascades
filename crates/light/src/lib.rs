@@ -433,7 +433,7 @@ fn recreate_texture(
         commands.entity(entity).despawn();
     }
 
-    let image = Image::new_fill(
+    let mut image = Image::new_fill(
         Extent3d {
             width: cascade_zero_x_axis_probes as u32,
             height: cascade_zero_y_axis_probes as u32,
@@ -444,6 +444,7 @@ fn recreate_texture(
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
     );
+    image.sampler = ImageSampler::linear();
 
     let handle = images.add(image);
 
