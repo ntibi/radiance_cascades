@@ -17,7 +17,7 @@ use bevy::{
     ui::UiPlugin,
     winit::WinitPlugin,
 };
-use light::{LightMaterial, LightPlugin};
+use light::{Light, LightMaterial, LightPlugin};
 use parry2d::{na::Vector2, shape::Cuboid};
 use utils::UtilsPlugin;
 mod rng;
@@ -130,29 +130,37 @@ fn regen_shapes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    shapes: Query<Entity, (With<LightMaterial>, With<RandomEmitter>)>,
+    shapes: Query<(Entity, &LightMaterial), With<RandomEmitter>>,
     mut rng: ResMut<GlobalRng>,
 ) {
-    let mut to_add = 0;
+    let mut emitters_to_add = 0;
+    let mut occluders_to_add = 0;
 
     if keyboard.just_pressed(KeyCode::KeyR) {
-        to_add = shapes.iter().len();
-        for entity in shapes.iter() {
+        for (entity, material) in shapes.iter() {
+            match material.behavior {
+                Light::Emitter(_) => emitters_to_add += 1,
+                Light::Occluder => occluders_to_add += 1,
+            }
             commands.entity(entity).despawn();
         }
     }
 
     if keyboard.just_pressed(KeyCode::Space) {
-        to_add += 1;
+        if keyboard.pressed(KeyCode::ShiftLeft) {
+            occluders_to_add += 1;
+        } else {
+            emitters_to_add += 1;
+        }
     }
 
     if keyboard.just_pressed(KeyCode::Backspace) {
-        for entity in shapes.iter() {
+        for (entity, _) in shapes.iter() {
             commands.entity(entity).despawn();
         }
     }
 
-    for _ in 0..to_add {
+    while occluders_to_add > 0 || emitters_to_add > 0 {
         let size_x = rng.0.next() * (MAX_SIZE - MIN_SIZE) + MIN_SIZE;
         let size_y = rng.0.next() * (MAX_SIZE - MIN_SIZE) + MIN_SIZE;
         let r = rng.0.next();
@@ -161,6 +169,14 @@ fn regen_shapes(
         let x = rng.0.next() * MAX_DIST_FROM_CENTER * 2. - MAX_DIST_FROM_CENTER;
         let y = rng.0.next() * MAX_DIST_FROM_CENTER * 2. - MAX_DIST_FROM_CENTER;
         let z = rng.0.next();
+
+        let behavior = if occluders_to_add > 0 {
+            occluders_to_add -= 1;
+            Light::Occluder
+        } else {
+            emitters_to_add -= 1;
+            Light::Emitter(Color::srgb(r, g, b))
+        };
 
         commands.spawn((
             RandomEmitter,
@@ -172,7 +188,7 @@ fn regen_shapes(
             },
             LightMaterial {
                 shape: Cuboid::new(Vector2::new(size_x / 2., size_y / 2.)),
-                color: Color::srgb(r, g, b),
+                behavior,
             },
         ));
     }

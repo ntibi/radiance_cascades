@@ -22,7 +22,12 @@ use utils::{Mouse, Viewport};
 #[derive(Component)]
 pub struct LightMaterial {
     pub shape: Cuboid,
-    pub color: Color,
+    pub behavior: Light,
+}
+
+pub enum Light {
+    Emitter(Color),
+    Occluder,
 }
 
 impl Plugin for LightPlugin {
@@ -229,9 +234,13 @@ mod tests {
 #[derive(Reflect, Resource, Default, InspectorOptions)]
 #[reflect(Resource, InspectorOptions)]
 struct RadianceCascadeDebug {
+    /// visualize probes rays
     pub rays: bool,
+    /// visualize interpolated probes around mouse
     pub mouse_rays: bool,
+    /// emit a light at the mouse position
     pub mouse_emitter: bool,
+    /// visualize the intermediate cascades
     pub cascade_view: bool,
 }
 
@@ -388,11 +397,17 @@ fn update_probes(
                     colors[cascade_index],
                 );
             }
-            hit.color.with_alpha(1.)
+            match hit.behavior {
+                // hit an emitter
+                Light::Emitter(color) => color.with_alpha(1.),
+                // hit an occluder
+                Light::Occluder => Color::srgba(0., 0., 0., 0.),
+            }
         } else {
             if debug.rays {
                 gizmos.line_2d(start, end, colors[cascade_index]);
             }
+            // hit nothing
             Color::srgba(0., 0., 0., 0.)
         };
     }
@@ -528,10 +543,15 @@ fn write_to_texture(
                         let mut probe_color: Vec4 = Vec4::ZERO;
                         let angle_indices =
                             conf.get_interpolated_angle_indices(ray_angle, cascade_index + 1);
+                        let mut angles_count = 0;
                         for angle_index in angle_indices.iter() {
-                            probe_color += data[i + *angle_index as usize].to_srgba().to_vec4();
+                            let color = data[i + *angle_index as usize];
+                            if color.alpha() > 0. {
+                                angles_count += 1;
+                                probe_color += color.to_srgba().to_vec4();
+                            }
                         }
-                        color += probe_color / angle_indices.len() as f32 * weight;
+                        color += probe_color / angles_count as f32 * weight;
                     }
 
                     let i = cascade_index * rays_per_cascade + ray;
@@ -652,7 +672,7 @@ fn mouse_emitter(
                     },
                     LightMaterial {
                         shape: Cuboid::new(Vector2::new(16., 16.)),
-                        color,
+                        behavior: Light::Emitter(color),
                     },
                 ))
                 .id();
@@ -702,16 +722,12 @@ fn debug_texture(
         next_power_of_two(viewport.world.x as u32 / conf.cascade_zero_spacing as u32) as usize;
     let cascade_zero_y_axis_probes =
         next_power_of_two(viewport.world.y as u32 / conf.cascade_zero_spacing as u32) as usize;
+    let rays_per_cascade =
+        cascade_zero_x_axis_probes * cascade_zero_y_axis_probes * conf.cascade_zero_rays;
 
     for cascade_index in 0..conf.cascades {
-        let start = cascade_index
-            * cascade_zero_x_axis_probes
-            * cascade_zero_y_axis_probes
-            * conf.cascade_zero_rays;
-        let end = (cascade_index + 1)
-            * cascade_zero_x_axis_probes
-            * cascade_zero_y_axis_probes
-            * conf.cascade_zero_rays;
+        let start = cascade_index * rays_per_cascade;
+        let end = (cascade_index + 1) * rays_per_cascade;
 
         let data = &cascade.data[start..end];
         let mut image = Image::new(
@@ -733,7 +749,11 @@ fn debug_texture(
 
         let handle = images.add(image);
 
-        let size = viewport.world / 10.;
+        let size = Vec2::new(
+            cascade_zero_x_axis_probes as f32 * conf.cascade_zero_rays as f32,
+            cascade_zero_y_axis_probes as f32,
+        ) * 4.;
+        //let size = viewport.world / 10.;
         let mut origin = camera_bottom_left.with_y(camera_bottom_left.y + 600.);
         origin -= Vec2::new(0., size.y * cascade_index as f32);
         commands.spawn((
